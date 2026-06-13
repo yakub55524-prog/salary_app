@@ -1,18 +1,16 @@
 import os
-import psycopg2
 from flask import Flask, render_template, request, redirect, url_for
+import psycopg2
 
 app = Flask(__name__)
 
-# Получаем URL базы данных из переменной окружения (Render подставляет автоматически)
 DATABASE_URL = os.environ.get('DATABASE_URL')
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable not set")
 
-# Функция для получения соединения с БД
 def get_db_connection():
-    conn = psycopg2.connect(DATABASE_URL, sslmode='require')
-    return conn
+    return psycopg2.connect(DATABASE_URL, sslmode='require')
 
-# Инициализация таблиц (создаём, если не существуют)
 def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -34,7 +32,6 @@ def init_db():
     cur.close()
     conn.close()
 
-# Справочники (точки)
 MINIMALKAS = {
     'Линия': 20000,
     'Европа': 20000,
@@ -49,14 +46,11 @@ PROCENTS = {
 }
 POINTS = list(MINIMALKAS.keys())
 
-# Получение месячных итогов (чистый ТО и настройки)
 def get_monthly_totals():
     conn = get_db_connection()
     cur = conn.cursor()
-    # Чистый ТО (включая дорогостой) – сумма (to_brutto - returns) / kol_vo_sotr
     cur.execute('SELECT SUM((to_brutto - returns) / kol_vo_sotr) FROM smeny')
     total_to = cur.fetchone()[0] or 0.0
-    # Настройки: сумма уникальных настроек за день (nastroiki / kol_vo_sotr)
     cur.execute('''
         SELECT SUM(nastroiki / kol_vo_sotr) 
         FROM (SELECT DISTINCT date, point, nastroiki, kol_vo_sotr FROM smeny) AS t
@@ -66,7 +60,6 @@ def get_monthly_totals():
     conn.close()
     return total_to, total_nastroiki
 
-# Коэффициенты (ТО и настройки)
 def get_coeffs():
     total_to, total_nastroiki = get_monthly_totals()
     plan_to = 1_350_000
@@ -75,7 +68,6 @@ def get_coeffs():
     k_nastroiki = 1.1 if total_nastroiki >= plan_nastroiki else 0.9
     return k_to, k_nastroiki
 
-# Расчёт зарплаты для одной смены
 def calculate_salary_row(row, k_to, k_nastroiki, max_mode=False):
     point = row[2]
     employee = row[3]
@@ -108,10 +100,8 @@ def calculate_salary_row(row, k_to, k_nastroiki, max_mode=False):
     else:
         premia = (proc_to * k_to + dolya_nastroek * k_nastroiki) * senior_bonus
 
-    total_salary = oklad + premia + bonus_dorog
-    return round(total_salary, 2)
+    return round(oklad + premia + bonus_dorog, 2)
 
-# --- Роуты ---
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
@@ -146,12 +136,7 @@ def smeny():
     rows = cur.fetchall()
     cur.close()
     conn.close()
-
-    smeny_data = []
-    for row in rows:
-        salary_real = calculate_salary_row(row, k_to, k_nastroiki, max_mode=False)
-        salary_max = calculate_salary_row(row, 1.05, 1.1, max_mode=True)
-        smeny_data.append((row, salary_real, salary_max))
+    smeny_data = [(row, calculate_salary_row(row, k_to, k_nastroiki, False), calculate_salary_row(row, 1.05, 1.1, True)) for row in rows]
     return render_template('smeny.html', smeny_data=smeny_data, k_to=k_to, k_nastroiki=k_nastroiki)
 
 @app.route('/delete/<int:smena_id>')
@@ -175,21 +160,16 @@ def itogi():
     for emp in employees:
         cur.execute('SELECT * FROM smeny WHERE employee = %s', (emp,))
         rows = cur.fetchall()
-        total_real = 0.0
-        total_max = 0.0
-        for row in rows:
-            total_real += calculate_salary_row(row, k_to, k_nastroiki, max_mode=False)
-            total_max += calculate_salary_row(row, 1.05, 1.1, max_mode=True)
+        total_real = sum(calculate_salary_row(r, k_to, k_nastroiki, False) for r in rows)
+        total_max = sum(calculate_salary_row(r, 1.05, 1.1, True) for r in rows)
         results.append((emp, round(total_real, 2), round(total_max, 2)))
     cur.close()
     conn.close()
-
     total_to, total_nastroiki = get_monthly_totals()
     plan_to = 1_350_000
     plan_nastroiki = 88_000
     to_ok = total_to >= plan_to
     nastroiki_ok = total_nastroiki >= plan_nastroiki
-
     return render_template('itogi.html', results=results,
                            total_to=round(total_to, 2),
                            total_nastroiki=round(total_nastroiki, 2),
@@ -206,6 +186,8 @@ def clear_all():
     conn.close()
     return redirect(url_for('itogi'))
 
+# Создаём таблицу при старте (для gunicorn)
+init_db()
+
 if __name__ == '__main__':
-    init_db()
     app.run(debug=True, host='0.0.0.0', port=5000)
