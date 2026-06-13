@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Итоги по сотрудникам</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f4f4f4; }
+        table { width: 100%; border-collapse: collapse; background: white; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background: #f2f2f2; }
+        a { display: inline-block; margin-top: 20px; margin-right: 15px; }
+        .plan-block { background: #eef; padding: 10px; margin-bottom: 20px; border-radius: 5px; }
+        .ok { color: green; font-weight: bold; }
+        .fail { color: red; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h2>Итоговая зарплата по сотрудникам за месяц</h2>
+    <div class="plan-block">
+        <h3>Выполнение месячных планов</h3>
+        <p><strong>План по ТО (чистый):</strong> 1 350 000 ₽ &nbsp; | &nbsp; <strong>Факт:</strong> {{ total_to }} ₽ &nbsp; →
+            {% if to_ok %}<span class="ok">выполнен (коэфф. ТО = {{ k_to }})</span>{% else %}<span class="fail">не выполнен (коэфф. ТО = {{ k_to }})</span>{% endif %}
+        </p>
+        <p><strong>План по настройкам:</strong> 88 000 ₽ &nbsp; | &nbsp; <strong>Факт:</strong> {{ total_nastroiki }} ₽ &nbsp; →
+            {% if nastroiki_ok %}<span class="ok">выполнен (коэфф. настроек = {{ k_nastroiki }})</span>{% else %}<span class="fail">не выполнен (коэфф. настроек = {{ k_nastroiki }})</span>{% endif %}
+        </p>
+    </div>
+    <table>
+        <thead>
+            <tr><th>Сотрудник</th><th>Зарплата (факт, ₽)</th><th>Зарплата (макс, ₽)</th></tr>
+        </thead>
+        <tbody>
+            {% for emp, sal_real, sal_max in results %}
+            <tr>
+                <td>{{ emp }}</td>
+                <td>{{ sal_real }}</td>
+                <td>{{ sal_max }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <p>
+        <a href="/">Добавить смену</a> |
+        <a href="/smeny">Все смены</a> |
+        <a href="/clear_all" onclick="return confirm('Удалить ВСЕ смены? Отменить нельзя!')">Очистить все данные</a>
+    </p>
+</body>
+</html>

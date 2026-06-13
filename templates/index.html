@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Добавить смену</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f4f4f4; }
+        .container { max-width: 500px; margin: auto; background: white; padding: 20px; border-radius: 8px; }
+        input, select, button { width: 100%; padding: 10px; margin: 5px 0; box-sizing: border-box; }
+        button { background: #28a745; color: white; border: none; cursor: pointer; }
+        a { display: inline-block; margin-top: 10px; margin-right: 15px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Добавить смену</h2>
+        <form method="POST">
+            <input type="date" name="date" required><br>
+            <select name="point" required>
+                <option value="">Выберите точку</option>
+                {% for point in points %}
+                <option value="{{ point }}">{{ point }}</option>
+                {% endfor %}
+            </select><br>
+            <input type="text" name="employee" required placeholder="Сотрудник"><br>
+            <input type="number" name="kol_vo_sotr" required step="1" placeholder="Кол-во сотрудников в смене"><br>
+            <input type="number" name="to_brutto" required step="0.01" placeholder="ТО брутто (продажи, ₽)"><br>
+            <input type="number" name="summa_dorog" step="0.01" placeholder="Сумма дорогостоя (₽)" value="0"><br>
+            <input type="number" name="kol_vo_dorog" step="1" placeholder="Кол-во дорогостоя (шт)" value="0"><br>
+            <input type="number" name="nastroiki" required step="0.01" placeholder="Настройки за день (₽)"><br>
+            <input type="number" name="returns" step="0.01" placeholder="Возвраты (₽)" value="0"><br>
+            <button type="submit">Сохранить</button>
+        </form>
+        <p>
+            <a href="/smeny">Посмотреть все смены</a> |
+            <a href="/itogi">Итоги по сотрудникам</a>
+        </p>
+    </div>
+</body>
+</html>
