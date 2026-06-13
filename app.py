@@ -1,29 +1,40 @@
+import os
+import psycopg2
 from flask import Flask, render_template, request, redirect, url_for
-import sqlite3
 
 app = Flask(__name__)
 
-# --- Инициализация базы данных ---
+# Получаем URL базы данных из переменной окружения (Render подставляет автоматически)
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+# Функция для получения соединения с БД
+def get_db_connection():
+    conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+    return conn
+
+# Инициализация таблиц (создаём, если не существуют)
 def init_db():
-    conn = sqlite3.connect('salary.db')
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS smeny (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        date TEXT,
-        point TEXT,
-        employee TEXT,
-        kol_vo_sotr INTEGER,
-        to_brutto REAL,
-        summa_dorog REAL,
-        kol_vo_dorog INTEGER,
-        nastroiki REAL,
-        returns REAL
-    )''')
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS smeny (
+            id SERIAL PRIMARY KEY,
+            date TEXT NOT NULL,
+            point TEXT NOT NULL,
+            employee TEXT NOT NULL,
+            kol_vo_sotr INTEGER NOT NULL,
+            to_brutto REAL NOT NULL,
+            summa_dorog REAL NOT NULL,
+            kol_vo_dorog INTEGER NOT NULL,
+            nastroiki REAL NOT NULL,
+            returns REAL NOT NULL
+        )
+    ''')
     conn.commit()
+    cur.close()
     conn.close()
 
-# --- Справочники (точки) ---
-# Минималка и процент по умолчанию (можно расширить)
+# Справочники (точки)
 MINIMALKAS = {
     'Линия': 20000,
     'Европа': 20000,
@@ -36,25 +47,26 @@ PROCENTS = {
     'Маскарад': 0.03,
     'Славянка': 0.03
 }
-POINTS = list(MINIMALKAS.keys())   # для выпадающего списка
+POINTS = list(MINIMALKAS.keys())
 
-# --- Получение месячных итогов (чистый ТО и настройки) ---
+# Получение месячных итогов (чистый ТО и настройки)
 def get_monthly_totals():
-    conn = sqlite3.connect('salary.db')
-    c = conn.cursor()
-    # Чистый ТО (включая дорогостой) – (to_brutto - returns) / kol_vo_sotr
-    c.execute('SELECT SUM((to_brutto - returns) / kol_vo_sotr) FROM smeny')
-    total_to = c.fetchone()[0] or 0.0
+    conn = get_db_connection()
+    cur = conn.cursor()
+    # Чистый ТО (включая дорогостой) – сумма (to_brutto - returns) / kol_vo_sotr
+    cur.execute('SELECT SUM((to_brutto - returns) / kol_vo_sotr) FROM smeny')
+    total_to = cur.fetchone()[0] or 0.0
     # Настройки: сумма уникальных настроек за день (nastroiki / kol_vo_sotr)
-    c.execute('''
+    cur.execute('''
         SELECT SUM(nastroiki / kol_vo_sotr) 
-        FROM (SELECT DISTINCT date, point, nastroiki, kol_vo_sotr FROM smeny)
+        FROM (SELECT DISTINCT date, point, nastroiki, kol_vo_sotr FROM smeny) AS t
     ''')
-    total_nastroiki = c.fetchone()[0] or 0.0
+    total_nastroiki = cur.fetchone()[0] or 0.0
+    cur.close()
     conn.close()
     return total_to, total_nastroiki
 
-# --- Коэффициенты (ТО и настройки) на основе выполнения планов ---
+# Коэффициенты (ТО и настройки)
 def get_coeffs():
     total_to, total_nastroiki = get_monthly_totals()
     plan_to = 1_350_000
@@ -63,9 +75,8 @@ def get_coeffs():
     k_nastroiki = 1.1 if total_nastroiki >= plan_nastroiki else 0.9
     return k_to, k_nastroiki
 
-# --- Расчёт зарплаты для одной смены (строки) ---
+# Расчёт зарплаты для одной смены
 def calculate_salary_row(row, k_to, k_nastroiki, max_mode=False):
-    # row: (id, date, point, employee, kol_vo_sotr, to_brutto, summa_dorog, kol_vo_dorog, nastroiki, returns)
     point = row[2]
     employee = row[3]
     kol_vo_sotr = row[4]
@@ -75,13 +86,9 @@ def calculate_salary_row(row, k_to, k_nastroiki, max_mode=False):
     nastroiki = row[8]
     returns = row[9]
 
-    # Чистый ТО (продажи минус возвраты)
     chisty_to = to_brutto - returns
-    # Минималка зависит от точки
     minimalka = chisty_to >= MINIMALKAS.get(point, 20000)
-    # ТО для начисления процента (чистый ТО минус сумма дорогостоя)
     to_for_proc = chisty_to - summa_dorog
-    # Процент от ТО из справочника
     proc = PROCENTS.get(point, 0.03)
 
     if minimalka:
@@ -91,18 +98,14 @@ def calculate_salary_row(row, k_to, k_nastroiki, max_mode=False):
         proc_to = 0.0
         dolya_nastroek = 0.0
 
-    # Бонус за дорогостой (каждому сотруднику за каждую единицу)
     bonus_dorog = 500 * kol_vo_dorog
     oklad = 1000
 
-    # Доплата старшему продавцу (Муслутдинов) – 10% к премиальной части
     senior_bonus = 1.1 if employee == "Муслутдинов" else 1.0
 
     if max_mode:
-        # Максимальная зарплата (коэффициенты всегда 1.05 и 1.1)
         premia = (proc_to * 1.05 + dolya_nastroek * 1.1) * senior_bonus
     else:
-        # Реальная зарплата с учётом выполнения планов
         premia = (proc_to * k_to + dolya_nastroek * k_nastroiki) * senior_bonus
 
     total_salary = oklad + premia + bonus_dorog
@@ -122,13 +125,14 @@ def index():
         nastroiki = float(request.form['nastroiki'])
         returns = float(request.form['returns'])
 
-        conn = sqlite3.connect('salary.db')
-        c = conn.cursor()
-        c.execute('''INSERT INTO smeny 
-                     (date, point, employee, kol_vo_sotr, to_brutto, summa_dorog, kol_vo_dorog, nastroiki, returns)
-                     VALUES (?,?,?,?,?,?,?,?,?)''',
-                  (date, point, employee, kol_vo_sotr, to_brutto, summa_dorog, kol_vo_dorog, nastroiki, returns))
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('''
+            INSERT INTO smeny (date, point, employee, kol_vo_sotr, to_brutto, summa_dorog, kol_vo_dorog, nastroiki, returns)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ''', (date, point, employee, kol_vo_sotr, to_brutto, summa_dorog, kol_vo_dorog, nastroiki, returns))
         conn.commit()
+        cur.close()
         conn.close()
         return redirect(url_for('smeny'))
     return render_template('index.html', points=POINTS)
@@ -136,10 +140,11 @@ def index():
 @app.route('/smeny')
 def smeny():
     k_to, k_nastroiki = get_coeffs()
-    conn = sqlite3.connect('salary.db')
-    c = conn.cursor()
-    c.execute('SELECT * FROM smeny ORDER BY date, point, employee')
-    rows = c.fetchall()
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('SELECT * FROM smeny ORDER BY date, point, employee')
+    rows = cur.fetchall()
+    cur.close()
     conn.close()
 
     smeny_data = []
@@ -151,31 +156,33 @@ def smeny():
 
 @app.route('/delete/<int:smena_id>')
 def delete_smena(smena_id):
-    conn = sqlite3.connect('salary.db')
-    c = conn.cursor()
-    c.execute('DELETE FROM smeny WHERE id = ?', (smena_id,))
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('DELETE FROM smeny WHERE id = %s', (smena_id,))
     conn.commit()
+    cur.close()
     conn.close()
     return redirect(url_for('smeny'))
 
 @app.route('/itogi')
 def itogi():
     k_to, k_nastroiki = get_coeffs()
-    conn = sqlite3.connect('salary.db')
-    c = conn.cursor()
-    c.execute('SELECT DISTINCT employee FROM smeny')
-    employees = [row[0] for row in c.fetchall()]
-
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('SELECT DISTINCT employee FROM smeny')
+    employees = [row[0] for row in cur.fetchall()]
     results = []
     for emp in employees:
-        c.execute('SELECT * FROM smeny WHERE employee = ?', (emp,))
-        rows = c.fetchall()
+        cur.execute('SELECT * FROM smeny WHERE employee = %s', (emp,))
+        rows = cur.fetchall()
         total_real = 0.0
         total_max = 0.0
         for row in rows:
             total_real += calculate_salary_row(row, k_to, k_nastroiki, max_mode=False)
             total_max += calculate_salary_row(row, 1.05, 1.1, max_mode=True)
         results.append((emp, round(total_real, 2), round(total_max, 2)))
+    cur.close()
+    conn.close()
 
     total_to, total_nastroiki = get_monthly_totals()
     plan_to = 1_350_000
@@ -191,10 +198,11 @@ def itogi():
 
 @app.route('/clear_all')
 def clear_all():
-    conn = sqlite3.connect('salary.db')
-    c = conn.cursor()
-    c.execute('DELETE FROM smeny')
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('DELETE FROM smeny')
     conn.commit()
+    cur.close()
     conn.close()
     return redirect(url_for('itogi'))
 
