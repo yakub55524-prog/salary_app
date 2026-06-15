@@ -13,10 +13,14 @@
         .plan-block { background: #eef; padding: 10px; margin-bottom: 20px; border-radius: 5px; }
         .ok { color: green; font-weight: bold; }
         .fail { color: red; font-weight: bold; }
+        .logout { float: right; margin-top: 5px; }
     </style>
 </head>
 <body>
-    <h2>Итоговая зарплата по сотрудникам за месяц</h2>
+    <div style="overflow: auto;">
+        <h2 style="float:left;">Итоговая зарплата по сотрудникам за месяц</h2>
+        <a href="/logout" class="logout" style="float:right;">Выйти</a>
+    </div>
     <div class="plan-block">
         <h3>Выполнение месячных планов</h3>
         <p><strong>План по ТО (чистый):</strong> 1 350 000 ₽ &nbsp; | &nbsp; <strong>Факт:</strong> {{ total_to }} ₽ &nbsp; →
@@ -42,8 +46,7 @@
     </table>
     <p>
         <a href="/">Добавить смену</a> |
-        <a href="/smeny">Все смены</a> |
-        <a href="/clear_all" onclick="return confirm('Удалить ВСЕ смены? Отменить нельзя!')">Очистить все данные</a>
+        <a href="/smeny">Все смены</a>
     </p>
 </body>
 </html>

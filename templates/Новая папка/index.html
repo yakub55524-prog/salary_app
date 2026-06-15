@@ -13,14 +13,10 @@
         a { margin-right: 10px; }
         .delete-btn { color: red; text-decoration: none; font-weight: bold; }
         .coeff-note { background: #eef; padding: 10px; margin-bottom: 15px; border-radius: 5px; }
-        .logout { float: right; margin-top: 5px; }
     </style>
 </head>
 <body>
-    <div style="overflow: auto;">
-        <h2 style="float:left;">Все смены</h2>
-        <a href="/logout" class="logout" style="float:right;">Выйти</a>
-    </div>
+    <h2>Все смены</h2>
     <div class="coeff-note">
         <strong>Применяемые коэффициенты:</strong>
         ТО: {{ k_to }} (1.05 если план выполнен, иначе 0.95) |
@@ -60,7 +56,8 @@
     </div>
     <p>
         <a href="/">Добавить смену</a> |
-        <a href="/itogi">Итоги по сотрудникам</a>
+        <a href="/itogi">Итоги по сотрудникам</a> |
+        <a href="/clear_all" onclick="return confirm('Удалить ВСЕ смены? Отменить нельзя!')">Очистить все данные</a>
     </p>
 </body>
 </html>

@@ -10,11 +10,15 @@
         input, select, button { width: 100%; padding: 10px; margin: 5px 0; box-sizing: border-box; }
         button { background: #28a745; color: white; border: none; cursor: pointer; }
         a { display: inline-block; margin-top: 10px; margin-right: 15px; }
+        .logout { float: right; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>Добавить смену</h2>
+        <div style="overflow: auto;">
+            <h2 style="float:left;">Добавить смену</h2>
+            <a href="/logout" class="logout" style="float:right;">Выйти</a>
+        </div>
         <form method="POST">
             <input type="date" name="date" required><br>
             <select name="point" required>
@@ -23,7 +27,7 @@
                 <option value="{{ point }}">{{ point }}</option>
                 {% endfor %}
             </select><br>
-            <input type="text" name="employee" required placeholder="Сотрудник"><br>
+            <input type="text" name="employee" required placeholder="Сотрудник (ФИО)"><br>
             <input type="number" name="kol_vo_sotr" required step="1" placeholder="Кол-во сотрудников в смене"><br>
             <input type="number" name="to_brutto" required step="0.01" placeholder="ТО брутто (продажи, ₽)"><br>
             <input type="number" name="summa_dorog" step="0.01" placeholder="Сумма дорогостоя (₽)" value="0"><br>
