@@ -12,15 +12,13 @@
         th { background: #f2f2f2; }
         a { margin-right: 10px; }
         .delete-btn { color: red; text-decoration: none; font-weight: bold; }
+        .edit-btn { color: #007bff; text-decoration: none; font-weight: bold; }
         .coeff-note { background: #eef; padding: 10px; margin-bottom: 15px; border-radius: 5px; }
-        .logout { float: right; margin-top: 5px; }
+        .actions a { display: inline-block; margin: 0 5px; }
     </style>
 </head>
 <body>
-    <div style="overflow: auto;">
-        <h2 style="float:left;">Все смены</h2>
-        <a href="/logout" class="logout" style="float:right;">Выйти</a>
-    </div>
+    <h2>Все смены</h2>
     <div class="coeff-note">
         <strong>Применяемые коэффициенты:</strong>
         ТО: {{ k_to }} (1.05 если план выполнен, иначе 0.95) |
@@ -30,11 +28,19 @@
         <table>
             <thead>
                 <tr>
-                    <th>ID</th><th>Дата</th><th>Точка</th><th>Сотрудник</th><th>Кол-во сотр</th>
-                    <th>ТО брутто</th><th>Сумма дорог</th><th>Кол-во дорог</th>
-                    <th>Настройки</th><th>Возвраты</th>
-                    <th>ЗП факт</th><th>ЗП макс</th>
-                    <th>Удалить</th>
+                    <th>ID</th>
+                    <th>Дата</th>
+                    <th>Точка</th>
+                    <th>Сотрудник</th>
+                    <th>Кол-во сотр</th>
+                    <th>ТО брутто</th>
+                    <th>Сумма дорог</th>
+                    <th>Кол-во дорог</th>
+                    <th>Настройки</th>
+                    <th>Возвраты</th>
+                    <th>ЗП факт</th>
+                    <th>ЗП макс</th>
+                    <th>Действия</th>
                 </tr>
             </thead>
             <tbody>
@@ -52,7 +58,10 @@
                     <td>{{ row[9] }}</td>
                     <td>{{ salary_real }} ₽</td>
                     <td>{{ salary_max }} ₽</td>
-                    <td><a href="/delete/{{ row[0] }}" onclick="return confirm('Удалить эту смену?')" class="delete-btn">🗑️ Удалить</a></td>
+                    <td class="actions">
+                        <a href="/delete/{{ row[0] }}" onclick="return confirm('Удалить эту смену?')" class="delete-btn">🗑️ Удалить</a>
+                        <a href="/edit/{{ row[0] }}" class="edit-btn">✏️ Редактировать</a>
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -60,7 +69,11 @@
     </div>
     <p>
         <a href="/">Добавить смену</a> |
-        <a href="/itogi">Итоги по сотрудникам</a>
+        <a href="/itogi">Итоги по сотрудникам</a> |
+        <a href="/logout">Выйти</a>
+        {% if role == 'admin' %}
+            | <a href="/clear_all" onclick="return confirm('Удалить ВСЕ смены? Отменить нельзя!')">Очистить все данные</a>
+        {% endif %}
     </p>
 </body>
 </html>
