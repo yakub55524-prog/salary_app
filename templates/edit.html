@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Редактировать смену</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        input, select { display: block; margin: 5px 0; padding: 8px; width: 300px; }
+        button { margin-top: 10px; padding: 10px 20px; background: #007bff; color: white; border: none; cursor: pointer; }
+        a { display: inline-block; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <h2>Редактирование смены</h2>
+    <form method="POST">
+        <label>Дата:</label>
+        <input type="date" name="date" value="{{ smena[1] }}" required>
+
+        <label>Точка:</label>
+        <select name="point" required>
+            {% for point in points %}
+                <option value="{{ point }}" {% if point == smena[2] %}selected{% endif %}>{{ point }}</option>
+            {% endfor %}
+        </select>
+
+        <label>Сотрудник:</label>
+        <input type="text" name="employee" value="{{ smena[3] }}" required>
+
+        <label>Кол-во сотрудников в смене:</label>
+        <input type="number" name="kol_vo_sotr" value="{{ smena[4] }}" step="1" required>
+
+        <label>ТО брутто (₽):</label>
+        <input type="number" name="to_brutto" value="{{ smena[5] }}" step="0.01" required>
+
+        <label>Сумма дорогостоя (₽):</label>
+        <input type="number" name="summa_dorog" value="{{ smena[6] }}" step="0.01">
+
+        <label>Кол-во дорогостоя (шт):</label>
+        <input type="number" name="kol_vo_dorog" value="{{ smena[7] }}" step="1">
+
+        <label>Настройки (₽):</label>
+        <input type="number" name="nastroiki" value="{{ smena[8] }}" step="0.01" required>
+
+        <label>Возвраты (₽):</label>
+        <input type="number" name="returns" value="{{ smena[9] }}" step="0.01">
+
+        <button type="submit">Сохранить изменения</button>
+    </form>
+    <a href="/smeny">Назад к списку</a>
+</body>
+</html>
