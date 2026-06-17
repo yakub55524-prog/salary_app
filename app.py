@@ -16,6 +16,7 @@ if not DATABASE_URL:
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL, sslmode='require')
 
+
 # --- Автоматическое создание таблиц ---
 def init_db():
     conn = get_db_connection()
@@ -45,6 +46,10 @@ def init_db():
             user_id INTEGER REFERENCES users(id)
         )
     ''')
+
+    # Добавляем столбец telegram_id, если его ещё нет (для Telegram-бота)
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_id TEXT UNIQUE;")
+
     conn.commit()
     cur.close()
     conn.close()
