@@ -1,16 +1,19 @@
-import logging
 import os
+import logging
 from datetime import datetime
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ConversationHandler
 
-# --- Настройка логирования ---
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+# Логирование
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Переменные окружения ---
+# Токен
 TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 if not TOKEN:
     raise RuntimeError("TELEGRAM_BOT_TOKEN not set")
@@ -23,7 +26,7 @@ if not DATABASE_URL:
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL, sslmode='require')
 
-# --- Функции работы с пользователями ---
+# --- Функции работы с пользователями (аналогичны предыдущим) ---
 def get_user_by_telegram_id(telegram_id):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -50,18 +53,7 @@ def update_telegram_id(user_id, telegram_id):
     cur.close()
     conn.close()
 
-def get_or_create_user(telegram_id, username):
-    """Проверяем, есть ли пользователь с таким telegram_id или username, если нет - создаём"""
-    user = get_user_by_telegram_id(telegram_id)
-    if user:
-        return user
-    user = get_user_by_username(username)
-    if user:
-        update_telegram_id(user['id'], telegram_id)
-        return user
-    return None  # пользователь не найден, нужно зарегистрироваться через веб-приложение
-
-# --- Функции расчёта (скопированы из app.py) ---
+# --- Функции расчёта (копия из app.py) ---
 MINIMALKAS = {
     'Линия': 20000,
     'Европа': 20000,
@@ -140,7 +132,7 @@ def calculate_salary_row(row, k_to, k_nastroiki, max_mode=False):
 
     return round(oklad + premia + bonus_dorog, 2)
 
-# --- Функции для работы со сменами ---
+# --- Функции работы со сменами (аналогичны) ---
 def get_shifts_for_user(user_id, date=None):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -181,235 +173,322 @@ def add_shift(user_id, date, point, employee, kol_vo_sotr, to_brutto, summa_doro
     cur.close()
     conn.close()
 
-# --- Состояния для ConversationHandler ---
-(USERNAME, SHIFT_DATE, SHIFT_POINT, SHIFT_EMPLOYEE, SHIFT_KOLVO, SHIFT_TO, SHIFT_SUMMA_DOROG, SHIFT_KOLVO_DOROG, SHIFT_NASTROIKI, SHIFT_RETURNS,
- RETURN_DATE, RETURN_AMOUNT) = range(12)
+# --- Состояния для FSM ---
+class AddShift(StatesGroup):
+    date = State()
+    point = State()
+    employee = State()
+    kol_vo = State()
+    to_brutto = State()
+    summa_dorog = State()
+    kol_vo_dorog = State()
+    nastroiki = State()
+    returns = State()
 
-# --- Функции команд ---
-async def start(update: Update, context):
-    user = update.effective_user
-    telegram_id = user.id
-    # Проверяем, есть ли пользователь в БД
-    db_user = get_user_by_telegram_id(telegram_id)
-    if db_user:
-        await update.message.reply_text(f"Добро пожаловать, {db_user['username']}!\nВаша роль: {db_user['role']}\nИспользуйте /help для списка команд.")
+class AddReturn(StatesGroup):
+    date = State()
+    amount = State()
+
+# --- Обработчики команд ---
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
+
+@dp.message(Command("start"))
+async def start(message: types.Message):
+    user = get_user_by_telegram_id(message.from_user.id)
+    if user:
+        await message.answer(f"Добро пожаловать, {user['username']}! Ваша роль: {user['role']}\nИспользуйте /help для списка команд.")
     else:
-        await update.message.reply_text("Добро пожаловать! Для начала работы укажите ваше имя пользователя (логин) из веб-приложения.\nВведите /set_username <ваш_логин>")
-    return ConversationHandler.END
+        await message.answer("Добро пожаловать! Для начала работы укажите ваш логин из веб-приложения.\n/set_username <ваш_логин>")
 
-async def set_username(update: Update, context):
-    args = context.args
-    if not args:
-        await update.message.reply_text("Пожалуйста, укажите имя пользователя после команды, например: /set_username admin")
+@dp.message(Command("set_username"))
+async def set_username(message: types.Message):
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("Пожалуйста, укажите имя пользователя после команды, например: /set_username admin")
         return
-    username = args[0]
+    username = args[1]
     user = get_user_by_username(username)
     if not user:
-        await update.message.reply_text("Пользователь с таким именем не найден. Зарегистрируйтесь сначала в веб-приложении.")
+        await message.answer("Пользователь с таким именем не найден. Зарегистрируйтесь сначала в веб-приложении.")
         return
-    telegram_id = update.effective_user.id
-    update_telegram_id(user['id'], telegram_id)
-    await update.message.reply_text(f"Имя пользователя {username} успешно привязано к вашему Telegram аккаунту! Теперь вы можете использовать все команды.")
+    update_telegram_id(user['id'], message.from_user.id)
+    await message.answer(f"Имя пользователя {username} успешно привязано к вашему Telegram аккаунту!")
 
-async def help_command(update: Update, context):
-    help_text = """
+@dp.message(Command("help"))
+async def help_command(message: types.Message):
+    text = """
     Доступные команды:
     /start - Начать работу
     /set_username <логин> - Привязать Telegram к пользователю
-    /add_shift - Добавить новую смену (пошагово)
+    /add_shift - Добавить новую смену
     /add_return - Добавить возврат к существующей смене
     /my_shifts - Показать мои смены за текущий месяц
     /all_shifts - (админ) Показать все смены
     /itogi - Показать итоги за месяц
     /help - Это сообщение
     """
-    await update.message.reply_text(help_text)
+    await message.answer(text)
 
-async def cancel(update: Update, context):
-    await update.message.reply_text("Операция отменена.")
-    return ConversationHandler.END
+@dp.message(Command("my_shifts"))
+async def my_shifts(message: types.Message):
+    user = get_user_by_telegram_id(message.from_user.id)
+    if not user:
+        await message.answer("Сначала привяжите аккаунт командой /set_username")
+        return
+    rows = get_shifts_for_user(user['id'])
+    if not rows:
+        await message.answer("У вас пока нет смен за этот месяц.")
+        return
+    text = "Ваши смены:\n\n"
+    for row in rows:
+        text += f"{row[1]} {row[2]} {row[3]} - ТО брутто: {row[5]} ₽, Настройки: {row[8]} ₽, Возвраты: {row[9]} ₽\n"
+    await message.answer(text)
 
-# --- Обработчик добавления смены ---
-async def add_shift_start(update: Update, context):
-    user = update.effective_user
-    db_user = get_user_by_telegram_id(user.id)
-    if not db_user:
-        await update.message.reply_text("Сначала привяжите аккаунт командой /set_username")
-        return ConversationHandler.END
-    context.user_data['user_id'] = db_user['id']
-    context.user_data['employee_name'] = db_user['username']  # по умолчанию, но можно будет изменить
-    await update.message.reply_text("Введите дату смены в формате ГГГГ-ММ-ДД (например, 2026-06-01):")
-    return SHIFT_DATE
+@dp.message(Command("all_shifts"))
+async def all_shifts(message: types.Message):
+    user = get_user_by_telegram_id(message.from_user.id)
+    if not user or user['role'] != 'admin':
+        await message.answer("У вас нет прав для просмотра всех смен.")
+        return
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('SELECT * FROM smeny ORDER BY date, point, employee')
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    if not rows:
+        await message.answer("Смен пока нет.")
+        return
+    text = "Все смены:\n\n"
+    for row in rows:
+        salary = calculate_salary_row(row, *get_coeffs(user_id=None), max_mode=False)
+        text += f"{row[1]} {row[2]} {row[3]} - ТО брутто: {row[5]} ₽, Возвраты: {row[9]} ₽, ЗП факт: {salary} ₽\n"
+    await message.answer(text)
 
-async def shift_date(update: Update, context):
-    date_str = update.message.text.strip()
+@dp.message(Command("itogi"))
+async def itogi(message: types.Message):
+    user = get_user_by_telegram_id(message.from_user.id)
+    if not user:
+        await message.answer("Сначала привяжите аккаунт командой /set_username")
+        return
+    if user['role'] == 'admin':
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('SELECT DISTINCT employee FROM smeny')
+        employees = [row[0] for row in cur.fetchall()]
+        cur.close()
+        conn.close()
+        text = "Итоговая зарплата (админ):\n"
+        for emp in employees:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute('SELECT * FROM smeny WHERE employee = %s', (emp,))
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+            total = sum(calculate_salary_row(row, *get_coeffs(user_id=None), max_mode=False) for row in rows)
+            text += f"{emp}: {total} ₽\n"
+        await message.answer(text)
+    else:
+        rows = get_shifts_for_user(user['id'])
+        if not rows:
+            await message.answer("У вас пока нет смен.")
+            return
+        total = sum(calculate_salary_row(row, *get_coeffs(user_id=user['id']), max_mode=False) for row in rows)
+        await message.answer(f"Ваша итоговая зарплата за месяц: {total} ₽")
+
+# --- Добавление смены (FSM) ---
+@dp.message(Command("add_shift"))
+async def add_shift_start(message: types.Message, state: FSMContext):
+    user = get_user_by_telegram_id(message.from_user.id)
+    if not user:
+        await message.answer("Сначала привяжите аккаунт командой /set_username")
+        return
+    await state.update_data(user_id=user['id'], employee_name=user['username'])
+    await message.answer("Введите дату смены (ГГГГ-ММ-ДД):")
+    await state.set_state(AddShift.date)
+
+@dp.message(AddShift.date)
+async def shift_date(message: types.Message, state: FSMContext):
+    date_str = message.text.strip()
     try:
         datetime.strptime(date_str, '%Y-%m-%d')
     except ValueError:
-        await update.message.reply_text("Неверный формат. Введите дату в формате ГГГГ-ММ-ДД:")
-        return SHIFT_DATE
-    context.user_data['date'] = date_str
-    # Спросим точку
-    keyboard = [[InlineKeyboardButton(point, callback_data=f'point_{point}')] for point in POINTS]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Выберите точку:", reply_markup=reply_markup)
-    return SHIFT_POINT
+        await message.answer("Неверный формат. Введите дату ГГГГ-ММ-ДД:")
+        return
+    await state.update_data(date=date_str)
+    # Выбор точки – инлайн-кнопки
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=point, callback_data=f"point_{point}")] for point in POINTS
+    ])
+    await message.answer("Выберите точку:", reply_markup=keyboard)
+    await state.set_state(AddShift.point)
 
-async def shift_point(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    point = query.data.split('_')[1]
-    context.user_data['point'] = point
-    await query.edit_message_text(f"Выбрана точка: {point}\nТеперь введите сотрудника (если оставить пустым, будет использован ваш логин):")
-    return SHIFT_EMPLOYEE
+@dp.callback_query(StateFilter(AddShift.point))
+async def shift_point(callback: types.CallbackQuery, state: FSMContext):
+    point = callback.data.split('_')[1]
+    await state.update_data(point=point)
+    await callback.message.edit_text(f"Выбрана точка: {point}\nТеперь введите сотрудника (или оставьте пустым для использования вашего логина):")
+    await callback.answer()
+    await state.set_state(AddShift.employee)
 
-async def shift_employee(update: Update, context):
-    employee = update.message.text.strip()
+@dp.message(AddShift.employee)
+async def shift_employee(message: types.Message, state: FSMContext):
+    employee = message.text.strip()
     if not employee:
-        employee = context.user_data.get('employee_name', 'Неизвестно')
-    context.user_data['employee'] = employee
-    await update.message.reply_text("Введите количество сотрудников в смене (число):")
-    return SHIFT_KOLVO
+        data = await state.get_data()
+        employee = data.get('employee_name', 'Неизвестно')
+    await state.update_data(employee=employee)
+    await message.answer("Введите количество сотрудников в смене (число):")
+    await state.set_state(AddShift.kol_vo)
 
-async def shift_kolvo(update: Update, context):
+@dp.message(AddShift.kol_vo)
+async def shift_kolvo(message: types.Message, state: FSMContext):
     try:
-        kol = int(update.message.text.strip())
+        kol = int(message.text.strip())
         if kol <= 0:
             raise ValueError
-        context.user_data['kol_vo_sotr'] = kol
+        await state.update_data(kol_vo=kol)
     except ValueError:
-        await update.message.reply_text("Введите положительное целое число:")
-        return SHIFT_KOLVO
-    await update.message.reply_text("Введите ТО брутто (сумма продаж, ₽):")
-    return SHIFT_TO
+        await message.answer("Введите положительное целое число:")
+        return
+    await message.answer("Введите ТО брутто (сумма продаж, ₽):")
+    await state.set_state(AddShift.to_brutto)
 
-async def shift_to(update: Update, context):
+@dp.message(AddShift.to_brutto)
+async def shift_to(message: types.Message, state: FSMContext):
     try:
-        to = float(update.message.text.strip())
+        to = float(message.text.strip())
         if to < 0:
             raise ValueError
-        context.user_data['to_brutto'] = to
+        await state.update_data(to_brutto=to)
     except ValueError:
-        await update.message.reply_text("Введите число >= 0:")
-        return SHIFT_TO
-    await update.message.reply_text("Введите сумму дорогостоя (₽) (если нет, введите 0):")
-    return SHIFT_SUMMA_DOROG
+        await message.answer("Введите число >= 0:")
+        return
+    await message.answer("Введите сумму дорогостоя (₽) (если нет, введите 0):")
+    await state.set_state(AddShift.summa_dorog)
 
-async def shift_summa_dorog(update: Update, context):
+@dp.message(AddShift.summa_dorog)
+async def shift_summa_dorog(message: types.Message, state: FSMContext):
     try:
-        summa = float(update.message.text.strip())
+        summa = float(message.text.strip())
         if summa < 0:
             raise ValueError
-        context.user_data['summa_dorog'] = summa
+        await state.update_data(summa_dorog=summa)
     except ValueError:
-        await update.message.reply_text("Введите число >= 0:")
-        return SHIFT_SUMMA_DOROG
-    await update.message.reply_text("Введите количество дорогостоящих товаров (шт) (если нет, 0):")
-    return SHIFT_KOLVO_DOROG
+        await message.answer("Введите число >= 0:")
+        return
+    await message.answer("Введите количество дорогостоящих товаров (шт) (если нет, 0):")
+    await state.set_state(AddShift.kol_vo_dorog)
 
-async def shift_kolvo_dorog(update: Update, context):
+@dp.message(AddShift.kol_vo_dorog)
+async def shift_kolvo_dorog(message: types.Message, state: FSMContext):
     try:
-        kol = int(update.message.text.strip())
+        kol = int(message.text.strip())
         if kol < 0:
             raise ValueError
-        context.user_data['kol_vo_dorog'] = kol
+        await state.update_data(kol_vo_dorog=kol)
     except ValueError:
-        await update.message.reply_text("Введите целое число >= 0:")
-        return SHIFT_KOLVO_DOROG
-    await update.message.reply_text("Введите сумму настроек за день (₽):")
-    return SHIFT_NASTROIKI
+        await message.answer("Введите целое число >= 0:")
+        return
+    await message.answer("Введите сумму настроек за день (₽):")
+    await state.set_state(AddShift.nastroiki)
 
-async def shift_nastroiki(update: Update, context):
+@dp.message(AddShift.nastroiki)
+async def shift_nastroiki(message: types.Message, state: FSMContext):
     try:
-        nastroiki = float(update.message.text.strip())
+        nastroiki = float(message.text.strip())
         if nastroiki < 0:
             raise ValueError
-        context.user_data['nastroiki'] = nastroiki
+        await state.update_data(nastroiki=nastroiki)
     except ValueError:
-        await update.message.reply_text("Введите число >= 0:")
-        return SHIFT_NASTROIKI
-    await update.message.reply_text("Введите сумму возвратов за день (₽) (если нет, 0):")
-    return SHIFT_RETURNS
+        await message.answer("Введите число >= 0:")
+        return
+    await message.answer("Введите сумму возвратов за день (₽) (если нет, 0):")
+    await state.set_state(AddShift.returns)
 
-async def shift_returns(update: Update, context):
+@dp.message(AddShift.returns)
+async def shift_returns(message: types.Message, state: FSMContext):
     try:
-        returns = float(update.message.text.strip())
+        returns = float(message.text.strip())
         if returns < 0:
             raise ValueError
-        context.user_data['returns'] = returns
+        await state.update_data(returns=returns)
     except ValueError:
-        await update.message.reply_text("Введите число >= 0:")
-        return SHIFT_RETURNS
+        await message.answer("Введите число >= 0:")
+        return
+    data = await state.get_data()
+    user_id = data['user_id']
+    date = data['date']
+    point = data['point']
+    employee = data['employee']
+    kol_vo_sotr = data['kol_vo']
+    to_brutto = data['to_brutto']
+    summa_dorog = data['summa_dorog']
+    kol_vo_dorog = data['kol_vo_dorog']
+    nastroiki = data['nastroiki']
+    returns_val = data['returns']
 
-    # Сохраняем смену
-    user_id = context.user_data['user_id']
-    date = context.user_data['date']
-    point = context.user_data['point']
-    employee = context.user_data['employee']
-    kol_vo_sotr = context.user_data['kol_vo_sotr']
-    to_brutto = context.user_data['to_brutto']
-    summa_dorog = context.user_data['summa_dorog']
-    kol_vo_dorog = context.user_data['kol_vo_dorog']
-    nastroiki = context.user_data['nastroiki']
-    returns = context.user_data['returns']
-
-    # Проверяем, нет ли уже такой смены
     existing = get_shift_by_date_point(user_id, date, point, employee)
     if existing:
-        await update.message.reply_text("Смена за эту дату, точку и сотрудника уже существует. Хотите обновить данные? (пока не реализовано, удалите старую через веб-интерфейс)")
-        return ConversationHandler.END
+        await message.answer("Смена за эту дату, точку и сотрудника уже существует. Удалите старую через веб-интерфейс.")
+        await state.clear()
+        return
 
-    add_shift(user_id, date, point, employee, kol_vo_sotr, to_brutto, summa_dorog, kol_vo_dorog, nastroiki, returns)
-    await update.message.reply_text(f"✅ Смена добавлена!\nДата: {date}\nТочка: {point}\nСотрудник: {employee}\nТО брутто: {to_brutto} ₽\nНастройки: {nastroiki} ₽\nВозвраты: {returns} ₽")
-    return ConversationHandler.END
+    add_shift(user_id, date, point, employee, kol_vo_sotr, to_brutto, summa_dorog, kol_vo_dorog, nastroiki, returns_val)
+    await message.answer(f"✅ Смена добавлена!\nДата: {date}\nТочка: {point}\nСотрудник: {employee}\nТО брутто: {to_brutto} ₽\nНастройки: {nastroiki} ₽\nВозвраты: {returns_val} ₽")
+    await state.clear()
 
-# --- Обработчик добавления возврата ---
-async def add_return_start(update: Update, context):
-    user = update.effective_user
-    db_user = get_user_by_telegram_id(user.id)
-    if not db_user:
-        await update.message.reply_text("Сначала привяжите аккаунт командой /set_username")
-        return ConversationHandler.END
-    context.user_data['user_id'] = db_user['id']
-    await update.message.reply_text("Введите дату смены, к которой добавляем возврат (ГГГГ-ММ-ДД):")
-    return RETURN_DATE
+# --- Добавление возврата ---
+@dp.message(Command("add_return"))
+async def add_return_start(message: types.Message, state: FSMContext):
+    user = get_user_by_telegram_id(message.from_user.id)
+    if not user:
+        await message.answer("Сначала привяжите аккаунт командой /set_username")
+        return
+    await state.update_data(user_id=user['id'])
+    await message.answer("Введите дату смены (ГГГГ-ММ-ДД):")
+    await state.set_state(AddReturn.date)
 
-async def return_date(update: Update, context):
-    date_str = update.message.text.strip()
+@dp.message(AddReturn.date)
+async def return_date(message: types.Message, state: FSMContext):
+    date_str = message.text.strip()
     try:
         datetime.strptime(date_str, '%Y-%m-%d')
     except ValueError:
-        await update.message.reply_text("Неверный формат. Введите дату в формате ГГГГ-ММ-ДД:")
-        return RETURN_DATE
-    context.user_data['return_date'] = date_str
-    # Найдём смены за эту дату для пользователя
-    user_id = context.user_data['user_id']
+        await message.answer("Неверный формат. Введите дату ГГГГ-ММ-ДД:")
+        return
+    await state.update_data(date=date_str)
+    user_id = (await state.get_data())['user_id']
     rows = get_shifts_for_user(user_id, date_str)
     if not rows:
-        await update.message.reply_text("Смен за эту дату не найдено. Сначала добавьте смену через /add_shift.")
-        return ConversationHandler.END
+        await message.answer("Смен за эту дату не найдено. Сначала добавьте смену через /add_shift.")
+        await state.clear()
+        return
     if len(rows) == 1:
-        context.user_data['smena_id'] = rows[0][0]
-        await update.message.reply_text(f"Найдена смена: {rows[0][1]} {rows[0][2]} {rows[0][3]}. Текущие возвраты: {rows[0][9]} ₽. Введите сумму возврата, которую нужно добавить:")
-        return RETURN_AMOUNT
+        await state.update_data(smena_id=rows[0][0])
+        await message.answer(f"Найдена смена: {rows[0][1]} {rows[0][2]} {rows[0][3]}. Текущие возвраты: {rows[0][9]} ₽. Введите сумму возврата для добавления:")
+        await state.set_state(AddReturn.amount)
     else:
-        # Несколько смен за день – уточним точку и сотрудника
+        # Несколько смен – уточняем
         options = []
         for row in rows:
             options.append(f"{row[2]} - {row[3]} (возвраты: {row[9]})")
-        await update.message.reply_text("Найдено несколько смен за эту дату. Уточните, какую смену редактировать? (пока не реализовано, выберите в веб-интерфейсе)")
-        return ConversationHandler.END
+        await message.answer("Найдено несколько смен за эту дату. Пока выберите через веб-интерфейс.")
+        await state.clear()
 
-async def return_amount(update: Update, context):
+@dp.message(AddReturn.amount)
+async def return_amount(message: types.Message, state: FSMContext):
     try:
-        amount = float(update.message.text.strip())
+        amount = float(message.text.strip())
         if amount < 0:
             raise ValueError
     except ValueError:
-        await update.message.reply_text("Введите положительное число:")
-        return RETURN_AMOUNT
-
-    smena_id = context.user_data['smena_id']
+        await message.answer("Введите положительное число:")
+        return
+    data = await state.get_data()
+    smena_id = data['smena_id']
     # Получаем текущие возвраты
     conn = get_db_connection()
     cur = conn.cursor()
@@ -419,127 +498,13 @@ async def return_amount(update: Update, context):
     update_shift_returns(smena_id, new_returns)
     cur.close()
     conn.close()
-    await update.message.reply_text(f"✅ Возврат добавлен! Новые общие возвраты за эту смену: {new_returns} ₽.")
-    return ConversationHandler.END
+    await message.answer(f"✅ Возврат добавлен! Новые общие возвраты за эту смену: {new_returns} ₽.")
+    await state.clear()
 
-# --- Просмотр смен ---
-async def my_shifts(update: Update, context):
-    user = update.effective_user
-    db_user = get_user_by_telegram_id(user.id)
-    if not db_user:
-        await update.message.reply_text("Сначала привяжите аккаунт командой /set_username")
-        return
-    rows = get_shifts_for_user(db_user['id'])
-    if not rows:
-        await update.message.reply_text("У вас пока нет смен за этот месяц.")
-        return
-    text = "Ваши смены за текущий месяц:\n\n"
-    for row in rows:
-        text += f"{row[1]} {row[2]} {row[3]} - ТО брутто: {row[5]} ₽, Настройки: {row[8]} ₽, Возвраты: {row[9]} ₽\n"
-    await update.message.reply_text(text)
-
-async def all_shifts(update: Update, context):
-    user = update.effective_user
-    db_user = get_user_by_telegram_id(user.id)
-    if not db_user or db_user['role'] != 'admin':
-        await update.message.reply_text("У вас нет прав для просмотра всех смен.")
-        return
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute('SELECT * FROM smeny ORDER BY date, point, employee')
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-    if not rows:
-        await update.message.reply_text("Смен пока нет.")
-        return
-    text = "Все смены:\n\n"
-    for row in rows:
-        text += f"{row[1]} {row[2]} {row[3]} - ТО брутто: {row[5]} ₽, Возвраты: {row[9]} ₽, ЗП факт: {calculate_salary_row(row, *get_coeffs(user_id=None), max_mode=False)} ₽\n"
-    await update.message.reply_text(text)
-
-async def itogi(update: Update, context):
-    user = update.effective_user
-    db_user = get_user_by_telegram_id(user.id)
-    if not db_user:
-        await update.message.reply_text("Сначала привяжите аккаунт командой /set_username")
-        return
-    if db_user['role'] == 'admin':
-        # Для админа покажем итоги по всем сотрудникам
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute('SELECT DISTINCT employee FROM smeny')
-        employees = [row[0] for row in cur.fetchall()]
-        cur.close()
-        conn.close()
-        text = "Итоговая зарплата (админ):\n"
-        for emp in employees:
-            # Получим все смены этого сотрудника
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute('SELECT * FROM smeny WHERE employee = %s', (emp,))
-            rows = cur.fetchall()
-            cur.close()
-            conn.close()
-            total = 0
-            for row in rows:
-                total += calculate_salary_row(row, *get_coeffs(user_id=None), max_mode=False)
-            text += f"{emp}: {total} ₽\n"
-        await update.message.reply_text(text)
-    else:
-        # Обычный пользователь – свои итоги
-        rows = get_shifts_for_user(db_user['id'])
-        if not rows:
-            await update.message.reply_text("У вас пока нет смен.")
-            return
-        total = 0
-        for row in rows:
-            total += calculate_salary_row(row, *get_coeffs(user_id=db_user['id']), max_mode=False)
-        await update.message.reply_text(f"Ваша итоговая зарплата за месяц: {total} ₽")
-
-# --- Основная функция ---
-def main():
-    application = Application.builder().token(TOKEN).build()
-
-    # Обработчики команд
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("set_username", set_username))
-    application.add_handler(CommandHandler("my_shifts", my_shifts))
-    application.add_handler(CommandHandler("all_shifts", all_shifts))
-    application.add_handler(CommandHandler("itogi", itogi))
-
-    # Добавление смены - ConversationHandler
-    add_shift_conv = ConversationHandler(
-        entry_points=[CommandHandler('add_shift', add_shift_start)],
-        states={
-            SHIFT_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, shift_date)],
-            SHIFT_POINT: [CallbackQueryHandler(shift_point, pattern='^point_')],
-            SHIFT_EMPLOYEE: [MessageHandler(filters.TEXT & ~filters.COMMAND, shift_employee)],
-            SHIFT_KOLVO: [MessageHandler(filters.TEXT & ~filters.COMMAND, shift_kolvo)],
-            SHIFT_TO: [MessageHandler(filters.TEXT & ~filters.COMMAND, shift_to)],
-            SHIFT_SUMMA_DOROG: [MessageHandler(filters.TEXT & ~filters.COMMAND, shift_summa_dorog)],
-            SHIFT_KOLVO_DOROG: [MessageHandler(filters.TEXT & ~filters.COMMAND, shift_kolvo_dorog)],
-            SHIFT_NASTROIKI: [MessageHandler(filters.TEXT & ~filters.COMMAND, shift_nastroiki)],
-            SHIFT_RETURNS: [MessageHandler(filters.TEXT & ~filters.COMMAND, shift_returns)],
-        },
-        fallbacks=[CommandHandler('cancel', cancel)]
-    )
-    application.add_handler(add_shift_conv)
-
-    # Добавление возврата - ConversationHandler
-    add_return_conv = ConversationHandler(
-        entry_points=[CommandHandler('add_return', add_return_start)],
-        states={
-            RETURN_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, return_date)],
-            RETURN_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, return_amount)],
-        },
-        fallbacks=[CommandHandler('cancel', cancel)]
-    )
-    application.add_handler(add_return_conv)
-
-    # Запуск бота
-    application.run_polling()
+# --- Запуск бота ---
+async def main():
+    await dp.start_polling(bot)
 
 if __name__ == '__main__':
-    main()
+    import asyncio
+    asyncio.run(main())
