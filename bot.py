@@ -1,11 +1,10 @@
-import os
 import logging
-import re
-from datetime import datetime, timedelta
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ConversationHandler
+import os
+from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ConversationHandler
 
 # --- Настройка логирования ---
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -184,7 +183,7 @@ def add_shift(user_id, date, point, employee, kol_vo_sotr, to_brutto, summa_doro
 
 # --- Состояния для ConversationHandler ---
 (USERNAME, SHIFT_DATE, SHIFT_POINT, SHIFT_EMPLOYEE, SHIFT_KOLVO, SHIFT_TO, SHIFT_SUMMA_DOROG, SHIFT_KOLVO_DOROG, SHIFT_NASTROIKI, SHIFT_RETURNS,
- RETURN_DATE, RETURN_AMOUNT) = range(13)
+ RETURN_DATE, RETURN_AMOUNT) = range(12)
 
 # --- Функции команд ---
 async def start(update: Update, context):
